@@ -1,0 +1,68 @@
+name: CI - Backend
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci-backend.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/ci-backend.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: portifolio_db
+          POSTGRES_USER: portifolio_user
+          POSTGRES_PASSWORD: portifolio_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U portifolio_user -d portifolio_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      POSTGRES_DB: portifolio_db
+      POSTGRES_USER: portifolio_user
+      POSTGRES_PASSWORD: portifolio_pass
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+
+      DJANGO_SECRET_KEY: ci-secret
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Django checks + migrate
+        working-directory: backend
+        run: |
+          python -m compileall .
+          python manage.py check
+          python manage.py migrate
+
+      - name: Run tests (if any)
+        working-directory: backend
+        run: |
+          python manage.py test
