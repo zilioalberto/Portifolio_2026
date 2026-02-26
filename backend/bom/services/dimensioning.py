@@ -119,21 +119,59 @@ def generate_bom_v1(project: Project) -> BomSuggestion:
     )
 
     # Seccionamento (MVP: assumimos que existe no painel se usuário não informou)
-    ProjectAlert.objects.create(
-        project=project, level=ProjectAlert.Level.INFO,
-        code="MAIN_ISOLATION_ASSUMED",
-        message="Seccionamento geral considerado no painel como padrão seguro (ajustável no futuro).",
-        context={}
+   
+    # --- Seccionamento do painel ---
+    if not ep.has_main_isolation:
+        ProjectAlert.objects.create(
+            project=project, level=ProjectAlert.Level.INFO,
+            code="MAIN_ISOLATION_NONE",
+            message="Projeto definido sem seccionamento (seccionadora) no painel.",
+            context={}
     )
-    BomItem.objects.create(
-        bom=bom,
-        category="MAIN_ISOLATOR",
-        description="Seccionadora geral / manopla porta (sugerido)",
-        qty=1,
-        manufacturer="SIEMENS",
-        part_number="TBD",
-        meta={"poles": poles},
-    )
+    else:
+        if ep.main_isolation_type == "DISCONNECTOR":
+            BomItem.objects.create(
+            bom=bom,
+            category="MAIN_ISOLATOR",
+            description="Seccionadora geral (sugerida)",
+            qty=1,
+            manufacturer="SIEMENS",
+            part_number="TBD",
+            meta={"poles": poles},
+        )
+        elif ep.main_isolation_type == "MCCB":
+            BomItem.objects.create(
+            bom=bom,
+            category="MAIN_MCCB",
+            description="Disjuntor Caixa Moldada (MCCB) como seccionamento (sugerido)",
+            qty=1,
+            manufacturer="SIEMENS",
+            part_number="TBD",
+            meta={
+                "poles": poles,
+                "In_estimated_a": str(itotal_with_margin.quantize(Decimal("0.01"))),
+                "Icu_required": icu_required,
+            },
+        )
+
+        if ep.mccb_has_external_handle:
+            BomItem.objects.create(
+                bom=bom,
+                category="MCCB_EXTERNAL_HANDLE",
+                description="Manopla externa para MCCB (sugerida)",
+                qty=1,
+                manufacturer="SIEMENS",
+                part_number="TBD",
+                meta={"model": ep.mccb_external_handle_model or "TBD"},
+            )
+        else:
+            ProjectAlert.objects.create(
+            project=project, level=ProjectAlert.Level.WARN,
+            code="MAIN_ISOLATION_TYPE_MISSING",
+            message="Seccionamento no painel habilitado, mas tipo não definido.",
+            context={}
+        )
+
 
     # Ramais motores (placeholder por carga)
     for l in loads:

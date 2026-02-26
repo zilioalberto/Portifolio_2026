@@ -10,16 +10,48 @@ class ElectricalParamsSerializer(serializers.ModelSerializer):
             "icc_value_ka", "icc_range_ka",
             "control_voltage", "ambient_temp_c", "ip_rating",
             "standard", "has_drives_emc",
+            "has_main_isolation",
+            "main_isolation_type",
+            "mccb_has_external_handle",
+            "mccb_external_handle_model",
         ]
 
     def validate(self, attrs):
         icc_value = attrs.get("icc_value_ka")
         icc_range = attrs.get("icc_range_ka")
-
         if icc_value is None and not icc_range:
             raise serializers.ValidationError(
                 {"icc_range_ka": "Icc não informado. Se não tiver o valor, selecione uma faixa (6/10/15/25kA)."}
             )
+
+    # ---- validações seccionamento ----
+        has_main_isolation = attrs.get("has_main_isolation", True)
+        main_isolation_type = attrs.get("main_isolation_type")
+        mccb_has_handle = attrs.get("mccb_has_external_handle", False)
+        handle_model = attrs.get("mccb_external_handle_model")
+
+        if has_main_isolation:
+            if not main_isolation_type:
+                raise serializers.ValidationError(
+                    {"main_isolation_type": "Selecione o tipo de seccionamento (Seccionadora ou MCCB)."}
+                )   
+
+            if main_isolation_type == "MCCB":
+            # se pediu manopla, modelo é obrigatório
+                if mccb_has_handle and not handle_model:
+                    raise serializers.ValidationError(
+                    {"mccb_external_handle_model": "Informe o modelo da manopla externa do MCCB."}
+                )
+            else:
+            # Se não for MCCB, zera campos de manopla (higiene)
+                attrs["mccb_has_external_handle"] = False
+                attrs["mccb_external_handle_model"] = None
+        else:
+        # Se não há seccionamento no painel, não faz sentido ter tipo ou manopla
+            attrs["main_isolation_type"] = None
+            attrs["mccb_has_external_handle"] = False
+            attrs["mccb_external_handle_model"] = None
+
         return attrs
 
 class LoadBaseSerializer(serializers.ModelSerializer):

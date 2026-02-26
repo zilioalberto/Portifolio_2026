@@ -13,6 +13,24 @@ class ElectricalParams(models.Model):
         KA_15 = "15", "15kA"
         KA_25 = "25", "25kA"
 
+    class MainIsolationType(models.TextChoices):
+        DISCONNECTOR = "DISCONNECTOR", "Seccionadora"
+        MCCB = "MCCB", "Disjuntor Caixa Moldada"
+
+    has_main_isolation = models.BooleanField(default=True)
+
+    main_isolation_type = models.CharField(
+        max_length=20,
+        choices=MainIsolationType.choices,
+        null=True,
+        blank=True,
+    )
+
+    mccb_has_external_handle = models.BooleanField(default=False)
+    mccb_external_handle_model = models.CharField(max_length=80, null=True, blank=True)
+
+
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     project = models.OneToOneField(Project, on_delete=models.CASCADE, related_name="electrical_params")
 
@@ -30,6 +48,8 @@ class ElectricalParams(models.Model):
     standard = models.CharField(max_length=32, default="IEC_60204_1")
 
     has_drives_emc = models.BooleanField(default=False)  # flag sugerida no passo 1
+    
+    has_main_isolation = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
