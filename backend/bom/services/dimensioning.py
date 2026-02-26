@@ -89,9 +89,11 @@ def generate_bom_v1(project: Project) -> BomSuggestion:
             d = l.dc24
             total_dc24 += Decimal(d.current_a) * qty
 
-    # fator de folga/disponibilidade
-    itotal = total_i
-    itotal_with_margin = itotal * Decimal("1.20")
+ # --- Dimensionamento: aplicar demanda + folga ---
+    itotal_raw = total_i
+    demand_factor = Decimal(str(project.demand_factor or Decimal("1.00")))
+    itotal_demanda = (itotal_raw * demand_factor)
+    itotal_dimensionamento = (itotal_demanda * Decimal("1.20"))  # folga 20%
 
     # polos
     poles = "4P" if (three_phase and ep.has_neutral) else ("3P" if three_phase else "1P")
@@ -112,9 +114,12 @@ def generate_bom_v1(project: Project) -> BomSuggestion:
         manufacturer="SIEMENS",
         part_number="TBD",
         meta={
-            "In_estimated_a": str(itotal_with_margin.quantize(Decimal("0.01"))),
+            "In_estimated_a": str(itotal_dimensionamento.quantize(Decimal("0.01"))),
             "Icu_required": icu_required,
             "poles": poles,
+            "demand_factor": str(demand_factor),
+            "itotal_raw_a": str(itotal_raw.quantize(Decimal("0.01"))),
+            "itotal_demanda_a": str(itotal_demanda.quantize(Decimal("0.01"))),
         },
     )
 
@@ -149,7 +154,7 @@ def generate_bom_v1(project: Project) -> BomSuggestion:
             part_number="TBD",
             meta={
                 "poles": poles,
-                "In_estimated_a": str(itotal_with_margin.quantize(Decimal("0.01"))),
+                "In_estimated_a": str(itotal_dimensionamento.quantize(Decimal("0.01"))),
                 "Icu_required": icu_required,
             },
         )
@@ -178,15 +183,66 @@ def generate_bom_v1(project: Project) -> BomSuggestion:
         if l.type == Load.LoadType.MOTOR and hasattr(l, "motor"):
             m = l.motor
 
-            # alertas EMC
-            if m.drive_type in ("VFD", "SERVO") and not ep.has_drives_emc:
-                ProjectAlert.objects.create(
-                    project=project, level=ProjectAlert.Level.WARN,
-                    code="EMC_RECOMMENDED",
-                    message=f"Carga '{l.name}' tem {m.drive_type}. Recomenda-se marcar 'tem drives/EMC' para habilitar itens EMC.",
-                    context={"load_id": str(l.id)}
-                )
+            # calcula corrente estimada do motor (por unidade)
+        motor_i_unit = _motor_current_a(m.power_kw, m.voltage_v, m.cosphi, m.efficiency, three_phase)
+        motor_i_total = (motor_i_unit * Decimal(str(l.quantity))).quantize(Decimal("0.01"))
 
+        # alertas EMC (para VFD/SERVO)
+        if m.drive_type in ("VFD", "SERVO") and not ep.has_drives_emc:
+            ProjectAlert.objects.create(
+                project=project, level=ProjectAlert.Level.WARN,
+                code="EMC_RECOMMENDED",
+                message=f"Carga '{l.name}' tem {m.drive_type}. Recomenda-se marcar 'tem drives/EMC' para habilitar itens EMC.",
+                context={"load_id": str(l.id)}
+            )
+
+        if m.drive_type == "DOL":
+            # 1) Disjuntor do ramo (placeholder)
+            BomItem.objects.create(
+                bom=bom,
+                category="BRANCH_BREAKER",
+                description=f"Disjuntor do ramo do motor '{l.name}' (sugerido)",
+                qty=1,
+                manufacturer="SIEMENS",
+                part_number="TBD",
+                meta={
+                    "load_id": str(l.id),
+                    "motor_current_a_unit": str(motor_i_unit.quantize(Decimal('0.01'))),
+                    "motor_current_a_total": str(motor_i_total),
+                    "suggestion": "Dimensionar In ~ 1.25×In_motor (ajustar conforme curva/aplicação)",
+                },
+            )
+
+            # 2) Contator AC-3 (placeholder)
+            BomItem.objects.create(
+                bom=bom,
+                category="CONTACTOR_AC3",
+                description=f"Contator AC-3 do motor '{l.name}' (sugerido)",
+                qty=1,
+                manufacturer="SIEMENS",
+                part_number="TBD",
+                meta={
+                    "load_id": str(l.id),
+                    "ac3_current_a": str(motor_i_unit.quantize(Decimal('0.01'))),
+                    "coil": ep.control_voltage,
+                },
+            )
+
+            # 3) Relé térmico (placeholder)
+            BomItem.objects.create(
+                bom=bom,
+                category="OVERLOAD_RELAY",
+                description=f"Relé térmico do motor '{l.name}' (sugerido)",
+                qty=1,
+                manufacturer="SIEMENS",
+                part_number="TBD",
+                meta={
+                    "load_id": str(l.id),
+                    "setting_range_hint_a": str(motor_i_unit.quantize(Decimal('0.01'))),
+                },
+            )
+        else:
+            # fallback para outros tipos (mantém placeholder por enquanto)
             BomItem.objects.create(
                 bom=bom,
                 category="MOTOR_BRANCH",
@@ -195,9 +251,11 @@ def generate_bom_v1(project: Project) -> BomSuggestion:
                 manufacturer="SIEMENS",
                 part_number="TBD",
                 meta={
+                    "load_id": str(l.id),
                     "drive_type": m.drive_type,
                     "power_kw": str(m.power_kw),
                     "voltage_v": m.voltage_v,
+                    "motor_current_a_unit": str(motor_i_unit.quantize(Decimal('0.01'))),
                 },
             )
 

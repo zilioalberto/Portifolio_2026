@@ -10,7 +10,13 @@ class WizardHappyPathTest(TestCase):
 
     def test_happy_path_generate_bom(self):
         # cria projeto
-        p = Project.objects.create(name="Projeto 1", panel_type=Project.PanelType.AUTOMATION, created_by=self.user)
+        
+        p = Project.objects.create(
+            name="Projeto 1",
+            panel_type=Project.PanelType.AUTOMATION,
+            created_by=self.user,
+            demand_factor="0.70",
+)
 
         # step1
         resp = self.client.put(
@@ -39,17 +45,24 @@ class WizardHappyPathTest(TestCase):
                 "type": "MOTOR",
                 "quantity": 1,
                 "motor": {"power_kw": "2.20", "voltage_v": 380, "drive_type": "DOL"},
-            },
+            },  
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 201)
 
         # gerar bom
-        resp = self.client.post(f"/api/projects/{p.id}/generate-bom/", content_type="application/json")
-        self.assertEqual(resp.status_code, 201)
         body = resp.json()
-        self.assertIn("bom", body)
-        self.assertGreaterEqual(len(body["bom"]["items"]), 2)
+        items = body["bom"]["items"]
+
+        # Deve conter disjuntor geral com demand_factor aplicado
+        main_breaker = next(i for i in items if i["category"] == "MAIN_BREAKER")
+        self.assertEqual(main_breaker["meta"]["demand_factor"], "0.70")
+
+        # Para motor DOL, deve ter 3 itens
+        cats = [i["category"] for i in items]
+        self.assertIn("BRANCH_BREAKER", cats)
+        self.assertIn("CONTACTOR_AC3", cats)
+        self.assertIn("OVERLOAD_RELAY", cats)
 
     def test_generate_bom_fails_without_step1(self):
         p = Project.objects.create(name="Projeto 2", panel_type=Project.PanelType.AUTOMATION, created_by=self.user)
